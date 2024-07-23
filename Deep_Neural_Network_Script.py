@@ -93,73 +93,84 @@ def xavier_initialisation(size_going_in, size_going_out):
 #hidden_layer_size = 50
 #output_layer_size = 1
 
-
-
+def xavier_initialisation(size_going_in, size_going_out, xavier_gain2):
+            return xavier_gain2*np.sqrt(6.0/(size_going_in + size_going_out)) #maybe add a gain
 
 class NeuralNetwork(nn.Module):
-    def __init__(self, number_of_hidden_layers, number_of_auxillary_variable, number_of_phase_space_parameters, hidden_layer_size, output_layer_size):
+    def __init__(self, number_of_hidden_layers, number_of_auxillary_variable, number_of_phase_space_parameters, hidden_layer_size,
+                  output_layer_size, activation_function, batch_size, normalisation_coefficient, xavier_gain, device_used):
         super(NeuralNetwork, self).__init__()
+        
+        self.activation_function = activation_function
+        self.batch_size = batch_size
+        self.normalisation_coefficient = normalisation_coefficient
+
         self.number_of_hidden_layers = number_of_hidden_layers   
         self.number_of_auxillary_variable = number_of_auxillary_variable  
         self.number_of_phase_space_parameters = number_of_phase_space_parameters
         self.input_layer_size = self.number_of_auxillary_variable + self.number_of_phase_space_parameters
         self.hidden_layer_size = hidden_layer_size
         self.output_layer_size = output_layer_size
-
+        self.xavier_gain = xavier_gain
+        self.device_used = device_used
+        
+     
         #torch.device('cpu')#'cuda')
-
-
+        device = torch.device(device_used)#'cuda')
         #xavier init
-        xavier_init_in_limit = xavier_initialisation(self.input_layer_size, self.hidden_layer_size)
-        xavier_init_hidden_limit = xavier_initialisation(self.hidden_layer_size, self.hidden_layer_size)
-        xavier_init_out_limit = xavier_initialisation(self.hidden_layer_size, self.output_layer_size)
-        print(xavier_init_in_limit)
-        print(xavier_init_hidden_limit)
-        print(xavier_init_out_limit)
+        xavier_init_in_limit = xavier_initialisation(self.input_layer_size, self.hidden_layer_size, xavier_gain)
+        xavier_init_hidden_limit = xavier_initialisation(self.hidden_layer_size, self.hidden_layer_size, xavier_gain)
+        xavier_init_out_limit = xavier_initialisation(self.hidden_layer_size, self.output_layer_size, xavier_gain)
 
-
+       # calcultae the std of for each network param
+        with torch.no_grad():
+           
+            print(xavier_init_in_limit)
+            print(xavier_init_hidden_limit)
+            print(xavier_init_out_limit)
+       
         #going to define a rank 3 weights tensor, and will make bias a rank 2 tensor 
         #first need the input to hidden layer, hidden layer-hidden layer and then hidden layer to output weights and il stack them
-        self.weights_input_hidden = nn.Parameter(torch.from_numpy(np.random.uniform(low = -xavier_init_in_limit, high = xavier_init_in_limit, size = (self.input_layer_size, self.hidden_layer_size))).to(torch.float32))
-        self.weights_hidden_hidden = nn.Parameter(torch.from_numpy(np.random.uniform(low = -xavier_init_hidden_limit, high = xavier_init_hidden_limit, size = (self.number_of_hidden_layers-1, self.hidden_layer_size, self.hidden_layer_size))).to(torch.float32))
-        self.weights_hidden_output = nn.Parameter(torch.from_numpy(np.random.uniform(low = -xavier_init_out_limit, high = xavier_init_out_limit, size = (self.hidden_layer_size, self.output_layer_size))).to(torch.float32))
-
-        self.bias_hidden = nn.Parameter(torch.zeros(self.number_of_hidden_layers+1, self.hidden_layer_size))
-        #bias from hidden to output layer doesn't get trained
-        #print(self.weights_hidden_hidden[0].shape) is hidden1 to hidden2
+        self.weights_input_hidden = nn.Parameter(torch.from_numpy(np.random.uniform(low = -xavier_init_in_limit, high = xavier_init_in_limit, size = (self.input_layer_size, self.hidden_layer_size))).to(torch.float64).to(device))
+        self.weights_hidden_hidden = nn.Parameter(torch.from_numpy(np.random.uniform(low = -xavier_init_hidden_limit, high = xavier_init_hidden_limit, size = (self.number_of_hidden_layers-1, self.hidden_layer_size, self.hidden_layer_size))).to(torch.float64).to(device))
+        self.weights_hidden_output = nn.Parameter(torch.from_numpy(np.random.uniform(low = -xavier_init_out_limit, high = xavier_init_out_limit, size = (self.hidden_layer_size, self.output_layer_size))).to(torch.float64).to(device))
+        self.bias_hidden = nn.Parameter(torch.zeros(self.number_of_hidden_layers+1, self.hidden_layer_size).to(torch.float64).to(device))
+        #self.bias_hidden = nn.Parameter(torch.zeros(self.number_of_hidden_layers+1, self.hidden_layer_size).to(torch.float64).to(device))
+        self.bias_output = nn.Parameter(torch.zeros(1, 1).to(torch.float64).to(device))
+        
+      
 
         
+    def activation_function_normal(self, x):
+        if self.activation_function == "tanh":
+            activation_function_value = torch.tanh(x)
 
-    def forward(self, x, s): #plotting
+        if self.activation_function == "sigmoid":
+            activation_function_value = torch.sigmoid(x)
 
-        ai_0 = torch.cat((x, s), dim = 0)
-        wij_1 = self.weights_input_hidden
-        bi_1 = self.bias_hidden[0]  
-        zi_1 = bi_1
-        for i in range(0,  self.input_layer_size): 
-            zi_1 = zi_1 + ai_0[i]*wij_1[i]
+        if self.activation_function == "GELU":
+            a_value = 0.044715
+            b_value = np.sqrt(2/np.pi)
+            activation_function_value = 0.5*x*(1 + torch.tanh(b_value*(x + a_value*x**3)))
 
-        ai_1 = torch.sigmoid(zi_1).T
-
-        #set the starting point of the math
-        ai_m_minus_1 = ai_1 #we will constanstly update this value when movig to the next layers m
-        zi_m = self.bias_hidden[1] #got to get the bias for the first hidden layer to the second hidden layer
-
-        
-        for m in range(2, self.number_of_hidden_layers+1):
-                 #nth compeontx
-            for n in range(0, self.hidden_layer_size): 
-                 #summation a function
-                zi_m = zi_m + ai_m_minus_1[n]*self.weights_hidden_hidden[m-2][n]
-
-            ai_m = torch.sigmoid(zi_m)  
-                #adjust the notation for the next loop 
-            ai_m_minus_1 = ai_m    
-            zi_m = self.bias_hidden[m]# is this m-1
-
-        Y_output = torch.matmul(ai_m_minus_1, self.weights_hidden_output)
-       # print(Y_output.shape)
-
-        return Y_output
+        return activation_function_value
     
-  
+    def forward(self, x_s): #plotting
+        ai_0 = x_s.to(torch.device(self.device_used))
+        ai_0.requires_grad_()
+        wij_1 = self.weights_input_hidden
+        wij_1.requires_grad_()
+        bi_1 = self.bias_hidden[0].unsqueeze(1)
+        zi_1= torch.matmul(wij_1.T, ai_0.T) + bi_1
+
+        ai_1 = self.activation_function_normal(zi_1)#.view(self.hidden_layer_size, 1)
+        ai_m_minus_1 = ai_1 
+        zi_m = self.bias_hidden[1]  #check this
+        for m in range(2, self.number_of_hidden_layers+1):
+            weights_between_hidden_layers = self.weights_hidden_hidden[m-2] #checkl this it is a square matrix
+            zi_m = zi_m.unsqueeze(1) + torch.matmul(weights_between_hidden_layers.T , ai_m_minus_1) #torch.Size([27, 17])
+            ai_m = self.activation_function_normal(zi_m) #use a different activation fucntion like tanh symmetric
+            ai_m_minus_1 = ai_m    
+            zi_m = self.bias_hidden[m]
+        Y_output = torch.matmul(self.weights_hidden_output.T , ai_m_minus_1) + self.bias_output
+        return Y_output.T
