@@ -97,7 +97,7 @@ def xavier_initialisation(size_going_in, size_going_out, xavier_gain2):
             return xavier_gain2*np.sqrt(6.0/(size_going_in + size_going_out)) #maybe add a gain
 
 class NeuralNetwork(nn.Module):
-    def __init__(self, number_of_hidden_layers, number_of_auxillary_variable, number_of_phase_space_parameters, hidden_layer_size,
+    def __init__(self, number_of_hidden_layers, number_of_inputs, hidden_layer_size,
                   output_layer_size, activation_function, batch_size, normalisation_coefficient, xavier_gain, device_used):
         super(NeuralNetwork, self).__init__()
         
@@ -106,9 +106,8 @@ class NeuralNetwork(nn.Module):
         self.normalisation_coefficient = normalisation_coefficient
 
         self.number_of_hidden_layers = number_of_hidden_layers   
-        self.number_of_auxillary_variable = number_of_auxillary_variable  
-        self.number_of_phase_space_parameters = number_of_phase_space_parameters
-        self.input_layer_size = self.number_of_auxillary_variable + self.number_of_phase_space_parameters
+        self.input_layer_size = number_of_inputs 
+      
         self.hidden_layer_size = hidden_layer_size
         self.output_layer_size = output_layer_size
         self.xavier_gain = xavier_gain
@@ -157,6 +156,7 @@ class NeuralNetwork(nn.Module):
     
     def forward(self, x_s): #plotting
         ai_0 = x_s.to(torch.device(self.device_used))
+      
         ai_0.requires_grad_()
         wij_1 = self.weights_input_hidden
         wij_1.requires_grad_()
@@ -170,7 +170,54 @@ class NeuralNetwork(nn.Module):
             weights_between_hidden_layers = self.weights_hidden_hidden[m-2] #checkl this it is a square matrix
             zi_m = zi_m.unsqueeze(1) + torch.matmul(weights_between_hidden_layers.T , ai_m_minus_1) #torch.Size([27, 17])
             ai_m = self.activation_function_normal(zi_m) #use a different activation fucntion like tanh symmetric
-            ai_m_minus_1 = ai_m    
+            ai_m_minus_1 = ai_m   
             zi_m = self.bias_hidden[m]
         Y_output = torch.matmul(self.weights_hidden_output.T , ai_m_minus_1) + self.bias_output
+
         return Y_output.T
+    
+class RecurrentNeuralNetwork(nn.Module):
+    def __init__(self, number_of_hidden_layers, input_layer_size, hidden_layer_size,
+                  output_layer_size, device_used, dropout):
+        super(RecurrentNeuralNetwork, self).__init__()
+        
+        self.number_of_hidden_layers = number_of_hidden_layers   
+        self.input_layer_size = input_layer_size
+        self.hidden_layer_size = hidden_layer_size
+        self.output_layer_size = output_layer_size
+        self.device_used = device_used
+
+        self.LSTM = nn.LSTM(input_layer_size, hidden_layer_size, number_of_hidden_layers, batch_first = True, dropout=dropout)# may have to chance this back to change the format of the input
+        self.fc = nn.Linear(hidden_layer_size, output_layer_size)
+        #add initialisation of weights for better convergence
+        self._initialize_weights()
+
+    def forward(self, x): #plotting
+        #initialize the hidden state with zeros
+        h0 = torch.zeros(self.number_of_hidden_layers,x.size(0), self.hidden_layer_size).to(self.device_used)
+        c0 = torch.zeros(self.number_of_hidden_layers,x.size(0), self.hidden_layer_size).to(self.device_used)
+        
+        #rnn forward pass
+        out, _ = self.LSTM(x, (h0,c0)) #input format is (batch_size, sequence_length, input_size)
+
+        #decode the hidden state of the last time step
+        out = self.fc(out[:, -1, :])
+
+        return out
+    def _initialize_weights(self):
+        for name, param in self.LSTM.named_parameters():
+            if 'weight_ih' in name:
+                nn.init.xavier_uniform_(param.data)
+            elif 'weight_hh' in name:
+                nn.init.orthogonal_(param.data)
+            elif 'bias' in name:
+                nn.init.constant_(param.data, 0)
+
+
+class RMSLELoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.mse = nn.MSELoss()
+        
+    def forward(self, pred, actual):
+        return torch.sqrt(self.mse(torch.log(pred + 1), torch.log(actual + 1)))
