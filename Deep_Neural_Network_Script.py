@@ -221,3 +221,42 @@ class RMSLELoss(nn.Module):
         
     def forward(self, pred, actual):
         return torch.sqrt(self.mse(torch.log(pred + 1), torch.log(actual + 1)))
+    
+
+class DeepNeural(nn.Module):
+    def __init__(self, n_inputs, n_hidden, n_layers, n_outputs, activation, device_used):
+        super(DeepNeural, self).__init__()
+
+        self.device_used = device_used
+
+        self.hidden_layers = nn.ModuleList()
+        self.hidden_layers.append(nn.Linear(n_inputs, n_hidden))
+
+        for i in range(n_layers-1):
+            self.hidden_layers.append(nn.Linear(n_hidden,n_hidden))
+
+        self.hidden_layers.append(nn.Linear(n_hidden, n_outputs))
+
+        self.activation = activation
+        #add initialisation of weights for better convergence
+        self._initialize_weights()
+
+    def activation_function(self,x):
+        if self.activation == 'gelu':
+            activation_value = 0.5*x*(1 + torch.tanh(np.sqrt(2/np.pi)*(x + 0.044715*x**3)))
+        return activation_value
+
+    def forward(self, x): #plotting
+        for layer in self.hidden_layers:
+            x = self.activation_function(layer(x))
+
+
+        return x
+    def _initialize_weights(self):
+        for name, param in self.hidden_layers.named_parameters():
+            if 'weight_ih' in name:
+                nn.init.xavier_uniform_(param.data)
+            elif 'weight_hh' in name:
+                nn.init.orthogonal_(param.data)
+            elif 'bias' in name:
+                nn.init.constant_(param.data, 0)
