@@ -200,6 +200,8 @@ class RecurrentNeuralNetwork(nn.Module):
         #rnn forward pass
         out, _ = self.LSTM(x, (h0,c0)) #input format is (batch_size, sequence_length, input_size)
 
+        #residual connection
+        
         #decode the hidden state of the last time step
         out = self.fc(out[:, -1, :])
 
